@@ -70,6 +70,11 @@ class SX1301Wrapper:
             fn.argtypes, fn.restype = args, result
         if lib.mp1301_abi_version() != 1:
             raise RuntimeError("Incompatible SX1301 native shim ABI")
+        # Additive diagnostic export: old ABI-1 libraries remain usable for RX.
+        diagnostics = getattr(lib, "mp1301_channel_diagnostics", None)
+        if diagnostics is not None:
+            diagnostics.argtypes = [c.POINTER(c.c_int32), c.c_uint]
+            diagnostics.restype = c.c_int
         self._lib = lib
 
     def reset(self):
@@ -142,6 +147,30 @@ class SX1301Wrapper:
                     timestamp_us=ticks.value, spreading_factor=sf.value,
                     bandwidth_khz=bw.value, coderate=cr.value, rssi=rssi.value, snr=snr.value))
             return result
+
+    def read_channel_diagnostics(self):
+        """Read raw registers under RX/TX ownership; never infer channel clear.
+
+        RSSI units/path, status bits, update latency and weak-signal detection
+        need independent validation for the configured standard LoRa modem.
+        Missing/failed diagnostics are errors, never an idle-channel result.
+        """
+        names = ("modem_status", "valid_headers_std", "valid_packets_std",
+                 "channel_rssi_raw", "baseband_rssi_raw", "decimator_rssi_raw",
+                 "rssi_channel_selection", "std_radio_selection")
+        with self._lock:
+            if not self._started:
+                raise RuntimeError("SX1301 is not running")
+            read = getattr(self._lib, "mp1301_channel_diagnostics", None)
+            if read is None:
+                raise NotImplementedError("Native library lacks passive diagnostics")
+            values = (c.c_int32 * len(names))()
+            before = time.monotonic()
+            if read(values, len(names)):
+                raise RuntimeError("SX1301 diagnostic register read failed")
+            return dict(registers=dict(zip(names, values)),
+                        monotonic_before=before, monotonic_after=time.monotonic(),
+                        channel_clear=None, calibrated=False)
 
     def build_tx_packet(self, payload, radio, config):
         packet = SX1301TxPacket(bytes(payload), int(radio.frequency_mhz * 1e6),

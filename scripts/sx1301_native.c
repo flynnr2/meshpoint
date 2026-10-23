@@ -24,6 +24,25 @@ int mp1301_last_tx_observed(void) { return last_tx_observed; }
 unsigned mp1301_crc_bad(void) { return bad_crc; }
 unsigned mp1301_no_crc(void) { return no_crc; }
 
+/* Passive, uncalibrated diagnostics for channel-access development.
+ * These registers do NOT constitute a CAD/clear-channel API. In particular,
+ * CHANN_RSSI's selected path is not assumed to be the active standard modem.
+ * Caller must hold the same serialization lock used for receive/send.
+ */
+int mp1301_channel_diagnostics(int32_t *values, unsigned capacity) {
+    static const uint16_t ids[] = {
+        LGW_MODEM_STATUS, LGW_VALID_HEADER_COUNTER_MBWSSF,
+        LGW_VALID_PACKET_COUNTER_MBWSSF, LGW_CHANN_RSSI,
+        LGW_BB_RSSI, LGW_DEC_RSSI, LGW_CHANN_SELECT_RSSI,
+        LGW_MBWSSF_RADIO_SELECT,
+    };
+    if (!started || !values || capacity < sizeof(ids) / sizeof(ids[0])) return -1;
+    for (unsigned i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
+        if (lgw_reg_r(ids[i], &values[i])) return -1;
+    }
+    return 0;
+}
+
 int mp1301_configure(uint32_t hz, int sf, int bw, int clock_source, int tx) {
     if (started || hz < 902000000 || hz > 928000000 || sf < 7 || sf > 12 ||
         (bw != 125 && bw != 250 && bw != 500) ||

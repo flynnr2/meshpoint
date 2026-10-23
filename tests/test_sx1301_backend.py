@@ -109,6 +109,55 @@ def test_rx_and_tx_calls_cannot_overlap():
     assert sent.is_set() and not rx.is_alive() and not tx.is_alive()
 
 
+def test_passive_diagnostics_return_raw_values_without_clear_channel_claim():
+    w = wrapper(tx=False)
+    def read(values, capacity):
+        assert capacity == 8
+        for i in range(capacity):
+            values[i] = i + 10
+        return 0
+    w._lib.mp1301_channel_diagnostics.side_effect = read
+    result = w.read_channel_diagnostics()
+    assert result["registers"]["valid_headers_std"] == 11
+    assert result["channel_clear"] is None and not result["calibrated"]
+    assert result["monotonic_after"] >= result["monotonic_before"]
+    w._lib.mp1301_send.assert_not_called()
+
+
+def test_unavailable_or_failed_diagnostics_never_mean_idle():
+    w = wrapper(tx=False)
+    w._lib.mp1301_channel_diagnostics.return_value = -1
+    with pytest.raises(RuntimeError, match="register read failed"):
+        w.read_channel_diagnostics()
+    w._lib.mp1301_channel_diagnostics = None
+    with pytest.raises(NotImplementedError):
+        w.read_channel_diagnostics()
+    w.stop()
+    with pytest.raises(RuntimeError, match="not running"):
+        w.read_channel_diagnostics()
+
+
+def test_passive_diagnostics_share_the_receive_lock():
+    w = wrapper(tx=False)
+    entered, release, read = threading.Event(), threading.Event(), threading.Event()
+    def blocked_receive():
+        entered.set()
+        assert release.wait(2)
+        return 0
+    w._lib.mp1301_receive.side_effect = blocked_receive
+    w._lib.mp1301_channel_diagnostics.side_effect = lambda *_a: read.set() or 0
+    rx = threading.Thread(target=w.receive)
+    diagnostic = threading.Thread(target=w.read_channel_diagnostics)
+    rx.start()
+    assert entered.wait(2)
+    diagnostic.start()
+    assert not read.wait(.05)
+    release.set()
+    rx.join(2)
+    diagnostic.join(2)
+    assert read.is_set() and not diagnostic.is_alive() and not rx.is_alive()
+
+
 def test_capture_factory_selects_sx1301_and_does_not_inject_sx1302_gains():
     from src.api.server import _build_pipeline, _inject_tx_gain_into_source
     from src.log_format import _describe_sources
