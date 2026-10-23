@@ -400,6 +400,12 @@ def _add_serial_source(coordinator: PipelineCoordinator, config: AppConfig):
 def _add_concentrator_source(
     coordinator: PipelineCoordinator, config: AppConfig
 ):
+    if config.capture.concentrator_backend == "sx1301":
+        from src.capture.sx1301_source import SX1301CaptureSource
+        coordinator.capture_coordinator.add_source(SX1301CaptureSource(config))
+        return
+    if config.capture.concentrator_backend != "sx1302":
+        raise ValueError("Unknown concentrator backend")
     try:
         from src.capture.concentrator_source import ConcentratorCaptureSource
         coordinator.capture_coordinator.add_source(
@@ -717,7 +723,7 @@ def _build_tx_service(
 def _wire_native_relay(
     coord: PipelineCoordinator, tx_service: TxService | None
 ) -> None:
-    """Hook the native onboard SX1302 path into the relay manager.
+    """Hook the selected native onboard radio into the relay manager.
 
     When ``transmit.enabled`` is true the onboard radio is the
     preferred relay backend: it preserves the original sender's
@@ -733,6 +739,11 @@ def _wire_native_relay(
     if tx_service is None or not tx_service.meshtastic_enabled:
         return
     relay = coord.relay_manager
+    wrapper = _get_concentrator_wrapper(coord)
+    if getattr(wrapper, "hardware_backend", None) == "sx1301":
+        relay.enabled = False
+        logger.warning("Automatic SX1301 relay disabled: hardware CAD/backoff is not implemented")
+        return
     if not relay.enabled:
         return
 
@@ -751,7 +762,7 @@ def _wire_native_relay(
     relay.set_transmit_function(_native_relay)
     relay.set_local_node_id(f"{tx_service.source_node_id:08x}")
     logger.info(
-        "Relay backend: native onboard SX1302 (identity-preserving)"
+        "Relay backend: native onboard concentrator (identity-preserving)"
     )
 
 
@@ -831,6 +842,9 @@ def _inject_tx_gain_into_source(coord: PipelineCoordinator) -> None:
     """
     conc_source = _find_concentrator_source(coord)
     if conc_source is None:
+        return
+    if getattr(conc_source._wrapper, "hardware_backend", None) == "sx1301":
+        # Its own start path supplies the carrier's SX1301 gain table.
         return
 
     async def _start_with_tx_gain() -> None:

@@ -1,0 +1,138 @@
+# Experimental Helium OG / RAK2247 SPI US915 only. Copy to local.yaml.
+# Obtain a valid activation key through the normal Meshpoint setup.
+# Gain settings recovered from Helium firmware; DAC gain 3 is Semtech default.
+# Choose a unique device_id before transmitting; keep TX/relay off until tested.
+radio:
+  region: US
+  frequency_mhz: 906.875
+  spreading_factor: 11
+  bandwidth_khz: 250
+  coding_rate: 4/5
+  sync_word: 43
+  spectral_scan_interval_seconds: 0
+capture:
+  sources:
+  - concentrator
+  concentrator_backend: sx1301
+  sx1301_lib_path: build/libsx1301_meshpoint.so
+  sx1301_reset_gpio: 25
+  sx1301_clksrc: 1
+  sx1301_tx_gain_lut:
+  - pa_gain: 0
+    mix_gain: 8
+    rf_power: -6
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 0
+    mix_gain: 10
+    rf_power: -3
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 0
+    mix_gain: 12
+    rf_power: 0
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 1
+    mix_gain: 8
+    rf_power: 3
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 1
+    mix_gain: 10
+    rf_power: 6
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 1
+    mix_gain: 12
+    rf_power: 10
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 1
+    mix_gain: 13
+    rf_power: 11
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 2
+    mix_gain: 9
+    rf_power: 12
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 1
+    mix_gain: 15
+    rf_power: 13
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 2
+    mix_gain: 10
+    rf_power: 14
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 2
+    mix_gain: 11
+    rf_power: 16
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 3
+    mix_gain: 9
+    rf_power: 20
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 3
+    mix_gain: 10
+    rf_power: 23
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 3
+    mix_gain: 11
+    rf_power: 25
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 3
+    mix_gain: 12
+    rf_power: 26
+    dig_gain: 0
+    dac_gain: 3
+  - pa_gain: 3
+    mix_gain: 14
+    rf_power: 27
+    dig_gain: 0
+    dac_gain: 3
+  meshcore_usb:
+    auto_detect: false
+dashboard:
+  host: 0.0.0.0
+  port: 8080
+storage:
+  database_path: data/concentrator.db
+device:
+  device_id: null
+  device_name: Helium OG SX1301
+  hardware_description: Helium OG / RAK2247 SPI / SX1301 / Pi 3 B+
+  latitude: null
+  longitude: null
+  altitude: null
+transmit:
+  enabled: false
+  tx_power_dbm: 10
+  long_name: Helium OG SX1301
+  short_name: SX1
+  hop_limit: 1
+  max_duty_cycle_percent: 1
+  nodeinfo:
+    interval_minutes: 0
+  telemetry:
+    interval_minutes: 0
+  position:
+    interval_minutes: 0
+upstream:
+  enabled: false
+  auth_token: ''
+mqtt:
+  enabled: false
+relay:
+  enabled: false
+  max_relay_per_minute: 2
+  burst_size: 1
+  min_relay_rssi: -125
+  max_relay_rssi: -50

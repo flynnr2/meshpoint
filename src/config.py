@@ -135,6 +135,11 @@ class CaptureConfig:
     serial_baud: int = 115200
     serial: list[SerialDeviceConfig] = field(default_factory=list)
     concentrator_spi_device: str = "/dev/spidev0.0"
+    concentrator_backend: str = "sx1302"
+    sx1301_lib_path: str = "build/libsx1301_meshpoint.so"
+    sx1301_reset_gpio: int = 25
+    sx1301_clksrc: int = 1
+    sx1301_tx_gain_lut: list[dict] = field(default_factory=list)
     meshcore_usb: MeshcoreUsbConfig = field(default_factory=MeshcoreUsbConfig)
 
 

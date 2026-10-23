@@ -344,3 +344,5 @@ AGPL-3.0: see [LICENSE](LICENSE). All source code, including HAL bindings, proto
 ---
 
 *Built for the mesh community by [Meshradar](https://meshradar.io).*
+
+Experimental Helium OG / RAK2247 SPI (SX1301) backend: see [hardware setup and limits](docs/SX1301-EXPERIMENTAL.md).

@@ -859,6 +859,10 @@ class TxService:
 
     def _build_hal_packet(self, packet_bytes: bytes):
         """Populate a LgwPktTxS struct from raw packet bytes."""
+        if getattr(self._wrapper, "hardware_backend", None) == "sx1301":
+            return self._wrapper.build_tx_packet(
+                packet_bytes, self._radio_config, self._config,
+            )
         from src.hal.sx1302_types import LgwPktTxS
         from src.hal.sx1302_wrapper import (
             BW_KHZ_TO_HAL,

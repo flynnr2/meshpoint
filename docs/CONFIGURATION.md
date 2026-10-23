@@ -431,9 +431,11 @@ limit.
 
 ## Smart Relay
 
-> **Status: experimental — native onboard relay added in v0.7.4.** When `transmit.enabled: true` the Meshpoint now relays through its own SX1302 concentrator using identity-preserving re-broadcast (original `source_id` and `packet_id` survive, only `hop_limit` is decremented). No second radio required. **Hardware validation is still in progress** — please report results in Discord or via a Github issue.
+> **Status: experimental — native onboard relay added in v0.7.4.** When `transmit.enabled: true` the Meshpoint now relays through its own SX1302 concentrator using identity-preserving re-broadcast (original `source_id` and `packet_id` survive, `hop_limit` is decremented and the relay-node byte identifies this transmitter). No second radio required. **Hardware validation is still in progress** — please report results in Discord or via a Github issue.
 
 ### Native onboard relay (preferred)
+
+The experimental SX1301 backend keeps automatic relay disabled until hardware channel access/backoff is implemented and verified; see [its diagnostic guide](SX1301-EXPERIMENTAL.md). The SX1302 path described here remains separate.
 
 Set both `transmit` and `relay` to enabled. The same SX1302 that handles outgoing messages re-broadcasts captured packets, sharing duty-cycle accounting so relay traffic can never crowd out user TX:
 
@@ -480,6 +482,7 @@ Enable the Meshpoint to send messages directly through the onboard SX1302 concen
 transmit:
   enabled: false               # opt-in
   node_id: null                # auto-generated 4-byte Meshtastic node ID
+  ok_to_mqtt: false             # consent for gateways to report our originated packets
   tx_power_dbm: 14             # conservative default (dBm)
   # max_duty_cycle_percent omitted: auto-derives from radio.region
   long_name: "Meshpoint"
@@ -490,6 +493,8 @@ transmit:
 **`enabled`**: must be `true` to send from the Messages tab. Disabled by default.
 
 **`node_id`**: leave as `null` to auto-generate. Once set, do not change it: your node identity is what other nodes see and cache in their contact lists.
+
+**`ok_to_mqtt`**: opt-in consent for receiving gateways to upload locally originated Meshtastic packets. This sets the Data protobuf reporting bit; it does not enable Meshpoint MQTT, cloud sharing, or change relayed senders' encrypted payloads. Defaults to `false`.
 
 **`tx_power_dbm`**: 14 dBm is conservative and compliant in most regions. Raise carefully; check your regional ISM band limits before increasing.
 

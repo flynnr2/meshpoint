@@ -260,7 +260,9 @@ _SOURCE_DESCRIPTIONS = {
 def _describe_sources(config: AppConfig) -> str:
     """Build a human-readable source list for the startup banner."""
     parts = [
-        _SOURCE_DESCRIPTIONS.get(s, s) for s in config.capture.sources
+        "concentrator (SX1301 single modem)"
+        if s == "concentrator" and config.capture.concentrator_backend == "sx1301"
+        else _SOURCE_DESCRIPTIONS.get(s, s) for s in config.capture.sources
     ]
     if (
         "meshcore_usb" not in config.capture.sources

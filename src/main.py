@@ -46,6 +46,12 @@ def _add_serial_source(coordinator: PipelineCoordinator, config) -> None:
 
 
 def _add_concentrator_source(coordinator: PipelineCoordinator, config) -> None:
+    if config.capture.concentrator_backend == "sx1301":
+        from src.capture.sx1301_source import SX1301CaptureSource
+        coordinator.capture_coordinator.add_source(SX1301CaptureSource(config))
+        return
+    if config.capture.concentrator_backend != "sx1302":
+        raise ValueError("Unknown concentrator backend")
     try:
         from src.capture.concentrator_source import ConcentratorCaptureSource
         coordinator.capture_coordinator.add_source(

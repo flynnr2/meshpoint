@@ -27,7 +27,7 @@ from src.storage.telemetry_repository import TelemetryRepository
 logger = logging.getLogger(__name__)
 
 _SOURCE_LABELS = {
-    "concentrator": "concentrator (8-ch SX1302)",
+    "concentrator": "concentrator",
     "serial": "serial radio",
     "meshcore_usb": "MeshCore USB node",
     "mock": "mock source",
