@@ -20,6 +20,12 @@ def wrapper(tx=True):
     w._lib = MagicMock()
     for name in ("configure", "add_gain", "start", "stop", "send", "receive"):
         getattr(w._lib, "mp1301_" + name).return_value = 0
+    registers = {}
+    w._lib.lgw_reg_w.side_effect = lambda reg, value: registers.__setitem__(reg, value) or 0
+    def read_register(reg, out):
+        out._obj.value = registers.get(reg, 0)
+        return 0
+    w._lib.lgw_reg_r.side_effect = read_register
     w._lib.mp1301_airtime.return_value = 500
     w._lib.mp1301_tx_status.return_value = 2
     w.configure(RadioConfig(frequency_mhz=906.875), tx)
@@ -218,3 +224,30 @@ async def test_native_failure_cannot_report_success():
         transmit_config=TransmitConfig(enabled=True, tx_power_dbm=10, node_id=0x12341234))
     raw = struct.pack("<IIIBBBB", 0xffffffff, 0x12345678, 999, 0x63, 8, 0, 0) + bytes(20)
     assert not (await service.send_raw_relay(raw)).success
+
+
+def test_receive_preamble_follows_configured_length():
+    w = wrapper()
+    w._lib.lgw_reg_w.assert_called_with(204, 18)
+    w.stop()
+    w.configure(RadioConfig(frequency_mhz=906.875, preamble_length=8), True)
+    w.start()
+    w._lib.lgw_reg_w.assert_called_with(204, 10)
+
+
+def test_receive_preamble_verification_failure_stops_native_owner():
+    w = wrapper()
+    w.stop()
+    w._lib.lgw_reg_r.side_effect = lambda reg, out: 0
+    with pytest.raises(RuntimeError, match="preamble verification"):
+        w.start()
+    assert not w._started
+    assert w._lib.mp1301_stop.call_count == 2
+
+
+@pytest.mark.parametrize("length", [0, 65534, 16.5])
+def test_receive_preamble_rejects_out_of_range_length(length):
+    w = wrapper()
+    w.stop()
+    with pytest.raises(ValueError, match="preamble"):
+        w.configure(RadioConfig(frequency_mhz=906.875, preamble_length=length), True)

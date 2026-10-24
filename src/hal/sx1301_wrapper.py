@@ -96,6 +96,9 @@ class SX1301Wrapper:
             raise ValueError("SX1301 channel extends outside US band")
         if transmit_enabled and not self._gains:
             raise ValueError("SX1301 TX requires the verified carrier gain table")
+        if not isinstance(radio.preamble_length, int) or not 6 <= radio.preamble_length <= 65533:
+            raise ValueError("SX1301 receive preamble must fit the 16-bit register including sync symbols")
+
         with self._lock:
             if self._lib.mp1301_configure(hz, sf, bw, self._clksrc, int(transmit_enabled)):
                 raise RuntimeError("SX1301 configuration failed")
@@ -109,6 +112,16 @@ class SX1301Wrapper:
         with self._lock:
             if self._lib.mp1301_start():
                 raise RuntimeError("SX1301 startup or sync-word verification failed")
+            # HAL5.0.1 leaves the service receiver at 10 symbols (8+2).
+            # Match the configured preamble; the register includes both sync symbols.
+            expected = self._radio.preamble_length + 2
+            write, read = self._lib.lgw_reg_w, self._lib.lgw_reg_r
+            write.argtypes, write.restype = [c.c_uint16, c.c_int32], c.c_int
+            read.argtypes, read.restype = [c.c_uint16, c.POINTER(c.c_int32)], c.c_int
+            actual = c.c_int32()
+            if write(204, expected) or read(204, c.byref(actual)) or actual.value != expected:
+                self._lib.mp1301_stop()
+                raise RuntimeError("SX1301 receive preamble verification failed")
             self._started = True
 
     def stop(self):
