@@ -35,6 +35,29 @@ Synthetic tests cover backend selection, ABI compatibility, RX conversion, bound
 
 Bench evidence includes decoded ambient Meshtastic packets and observed native transmissions. Independent RF returns and correlated traceroute replies were obtained by the separate HNTOG validation stack. Startup/calibration variability, RF output measurement, repeated cold boots and other carrier/region support remain open work.
 
+## Receive preamble correction
+
+Semtech HAL 5.0.1 leaves the single-SF service receiver preamble limit at 10
+(eight preamble symbols plus two sync symbols). Meshtastic's configured default
+is 16 preamble symbols. After each native start this backend writes the
+configured length plus two to SX1301 register 204 and verifies it by readback.
+A write error, read error or mismatch stops the concentrator and rejects startup.
+Configuration must fit the 16-bit register, including the two sync symbols.
+
+Controlled RAK2247/SX1301 results: TX8/RX10 received 6/6; reverting to
+TX16/RX10 received 0/2; TX16/RX18 received 4/4 across two initializations.
+The normal receiver subsequently received 2/2 from an independent native sender
+using TX16. These small trials validate the observed mismatch and correction on
+this board; they are not sensitivity or reliability estimates. The correction
+was exercised in the experiment integration; this isolated contribution has
+software checks and has not been newly installed as part of submission preparation.
+Do not transfer the SX1301 plus-two rule to SX1302 register semantics.
+
+Passive register diagnostics are raw, uncalibrated observations. In a separate
+five-minute observation, MODEM_STATUS remained zero during known receptions;
+zero status must not be interpreted as verified channel idle. This backend
+provides no hardware CAD or clear-channel guarantee.
+
 ## Contribution boundary
 
 This branch contains the hardware adapter, build helper, safe example configuration, integration hooks, hardware tests and this guide. It contains no experiment scheduler, OG13 announcements, reception-results dashboard, MQTT evidence watcher, traceroute scheduler, HNTOG user services, GNSS/chrony work or map artifacts.

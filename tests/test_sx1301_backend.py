@@ -251,3 +251,17 @@ def test_receive_preamble_rejects_out_of_range_length(length):
     w.stop()
     with pytest.raises(ValueError, match="preamble"):
         w.configure(RadioConfig(frequency_mhz=906.875, preamble_length=length), True)
+
+
+@pytest.mark.parametrize("operation", ["write", "read"])
+def test_receive_preamble_register_error_stops_native_owner(operation):
+    w = wrapper()
+    w.stop()
+    if operation == "write":
+        w._lib.lgw_reg_w.side_effect = lambda reg, value: -1
+    else:
+        w._lib.lgw_reg_r.side_effect = lambda reg, out: -1
+    with pytest.raises(RuntimeError, match="preamble verification"):
+        w.start()
+    assert not w._started
+    assert w._lib.mp1301_stop.call_count == 2
