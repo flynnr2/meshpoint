@@ -51,7 +51,7 @@ class SX1301Wrapper:
         lib = c.CDLL(str(self._path))
         functions = {
             "mp1301_abi_version": ([], c.c_int),
-            "mp1301_configure": ([c.c_uint32] + [c.c_int] * 4, c.c_int),
+            "mp1301_configure": ([c.c_uint32] + [c.c_int] * 5, c.c_int),
             "mp1301_add_gain": ([c.c_int] * 5, c.c_int),
             "mp1301_start": ([], c.c_int), "mp1301_stop": ([], c.c_int),
             "mp1301_receive": ([], c.c_int),
@@ -68,9 +68,9 @@ class SX1301Wrapper:
         for name, (args, result) in functions.items():
             fn = getattr(lib, name)
             fn.argtypes, fn.restype = args, result
-        if lib.mp1301_abi_version() != 1:
+        if lib.mp1301_abi_version() != 2:
             raise RuntimeError("Incompatible SX1301 native shim ABI")
-        # Additive diagnostic export: old ABI-1 libraries remain usable for RX.
+        # Additive diagnostic export: not a channel-clear decision.
         diagnostics = getattr(lib, "mp1301_channel_diagnostics", None)
         if diagnostics is not None:
             diagnostics.argtypes = [c.POINTER(c.c_int32), c.c_uint]
@@ -100,7 +100,9 @@ class SX1301Wrapper:
             raise ValueError("SX1301 receive preamble must fit the 16-bit register including sync symbols")
 
         with self._lock:
-            if self._lib.mp1301_configure(hz, sf, bw, self._clksrc, int(transmit_enabled)):
+            if self._lib.mp1301_configure(
+                hz, sf, bw, self._clksrc, int(transmit_enabled), radio.preamble_length
+            ):
                 raise RuntimeError("SX1301 configuration failed")
             for gain in self._gains:
                 if self._lib.mp1301_add_gain(*(gain[k] for k in
@@ -188,7 +190,8 @@ class SX1301Wrapper:
     def build_tx_packet(self, payload, radio, config):
         packet = SX1301TxPacket(bytes(payload), int(radio.frequency_mhz * 1e6),
             radio.spreading_factor, int(radio.bandwidth_khz),
-            int(radio.coding_rate.split("/")[1]) - 4, config.tx_power_dbm)
+            int(radio.coding_rate.split("/")[1]) - 4, config.tx_power_dbm,
+            preamble=radio.preamble_length)
         self._validate_packet(packet)
         return packet
 
@@ -196,8 +199,8 @@ class SX1301Wrapper:
         if not isinstance(p, SX1301TxPacket) or not 16 <= p.size <= 255:
             raise ValueError("Invalid SX1301 TX packet")
         r = self._radio
-        if r is None or (p.freq_hz, p.datarate, p.bandwidth) != (
-            int(r.frequency_mhz * 1e6), r.spreading_factor, int(r.bandwidth_khz)):
+        if r is None or (p.freq_hz, p.datarate, p.bandwidth, p.preamble) != (
+            int(r.frequency_mhz * 1e6), r.spreading_factor, int(r.bandwidth_khz), r.preamble_length):
             raise ValueError("SX1301 TX must match configured receiver")
         if p.rf_power not in {g["rf_power"] for g in self._gains} or not 1 <= p.coderate <= 4:
             raise ValueError("Unsupported SX1301 power or coding rate")

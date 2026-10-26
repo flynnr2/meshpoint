@@ -16,10 +16,11 @@ static struct lgw_tx_gain_lut_s gains;
 static unsigned count, bad_crc, no_crc;
 static uint32_t frequency, rate;
 static uint8_t bandwidth;
+static uint16_t preamble_length;
 static bool started, transmit;
 static int last_tx_observed;
 
-int mp1301_abi_version(void) { return 1; }
+int mp1301_abi_version(void) { return 2; }
 int mp1301_last_tx_observed(void) { return last_tx_observed; }
 unsigned mp1301_crc_bad(void) { return bad_crc; }
 unsigned mp1301_no_crc(void) { return no_crc; }
@@ -43,14 +44,16 @@ int mp1301_channel_diagnostics(int32_t *values, unsigned capacity) {
     return 0;
 }
 
-int mp1301_configure(uint32_t hz, int sf, int bw, int clock_source, int tx) {
+int mp1301_configure(uint32_t hz, int sf, int bw, int clock_source, int tx, int preamble) {
     if (started || hz < 902000000 || hz > 928000000 || sf < 7 || sf > 12 ||
         (bw != 125 && bw != 250 && bw != 500) ||
-        (clock_source != 0 && clock_source != 1) || (tx != 0 && tx != 1)) return -1;
+        (clock_source != 0 && clock_source != 1) || (tx != 0 && tx != 1) ||
+        preamble < 6 || preamble > 65533) return -1;
     frequency = hz;
     rate = 1U << (sf - 6);
     bandwidth = bw == 125 ? BW_125KHZ : bw == 250 ? BW_250KHZ : BW_500KHZ;
     transmit = tx;
+    preamble_length = (uint16_t)preamble;
     count = bad_crc = no_crc = 0;
     memset(&gains, 0, sizeof(gains));
     struct lgw_conf_board_s board = {.lorawan_public = false, .clksrc = clock_source};
@@ -158,7 +161,7 @@ static int tx_packet(struct lgw_pkt_tx_s *p, const uint8_t *payload,
     p->freq_hz = frequency; p->tx_mode = IMMEDIATE; p->rf_chain = 0;
     p->rf_power = power; p->modulation = MOD_LORA;
     p->bandwidth = bandwidth; p->datarate = rate; p->coderate = cr;
-    p->preamble = 16; p->size = size;
+    p->preamble = preamble_length; p->size = size;
     memcpy(p->payload, payload, size);
     return 0;
 }
@@ -175,12 +178,12 @@ int mp1301_tx_status(void) {
 }
 
 int mp1301_send(const uint8_t *payload, unsigned size, int power, int cr) {
+    last_tx_observed = 0;
     if (!started || !transmit || mp1301_tx_status() != TX_FREE) return -1;
     bool found = false;
     for (unsigned i = 0; i < gains.size; i++) if (gains.lut[i].rf_power == power) found = true;
     struct lgw_pkt_tx_s p;
     if (!found || tx_packet(&p, payload, size, power, cr) || lgw_send(p)) return -1;
-    last_tx_observed = 0;
     /* HAL acceptance alone is not completion. Observe emission and return to idle. */
     unsigned limit = lgw_time_on_air(&p) + 2000;
     for (unsigned elapsed = 0; elapsed < limit; elapsed += 5) {

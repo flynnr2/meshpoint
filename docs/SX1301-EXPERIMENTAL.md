@@ -14,14 +14,53 @@ The private C shim builds against Semtech HAL 5.0.1 headers and exposes a primit
 
 Use a dedicated checkout and normal SPI/GPIO permissions. The upstream installer is unchanged and does not install this backend.
 
+The exact companion driver is published separately at
+[`79871283e08c45e89d1196a5469e1aa68f544e71`](https://github.com/flynnr2/lora_gateway/tree/79871283e08c45e89d1196a5469e1aa68f544e71).
+Review the [complete four-line timing diff against v5.0.1](https://github.com/flynnr2/lora_gateway/compare/a955619271b5d0a46d32e08150acfbc1eed183b7...79871283e08c45e89d1196a5469e1aa68f544e71).
+It is a separate experimental driver dependency, not vendored Meshpoint source.
+
+For a fresh Linux/Pi candidate, with a C toolchain, Git, Python 3 and Make:
+
 ```sh
-git clone --branch v5.0.1 https://github.com/Lora-net/lora_gateway.git ~/lora_gateway_sx1301
+git clone https://github.com/flynnr2/lora_gateway.git ~/lora_gateway_sx1301
+cd ~/lora_gateway_sx1301
+git checkout --detach 79871283e08c45e89d1196a5469e1aa68f544e71
+
+git clone https://github.com/flynnr2/meshpoint.git ~/meshpoint_sx1301_candidate
+cd ~/meshpoint_sx1301_candidate
+git checkout submission/sx1301-backend-20261025
 ./scripts/build_sx1301_native.sh ~/lora_gateway_sx1301
 ```
 
-The script rebuilds a position-independent HAL archive and writes checkout-local `build/libsx1301_meshpoint.so` plus `build/sx1301-hal-revision.txt`. It never replaces system libloragw. Reference HAL revision is `a955619271b5d0a46d32e08150acfbc1eed183b7`.
+The script rebuilds a position-independent HAL archive and writes checkout-local
+`build/libsx1301_meshpoint.so`, `build/sx1301-hal-revision.txt` and
+`build/sx1301-build-provenance.json`. It never replaces system libloragw. Native
+ABI **2** is required: older ABI-1 libraries are rejected and must be rebuilt.
+The manifest records all tracked HAL file hashes, revision, generated-config,
+archive, shim and library hashes, compiler versions/flags and the Meshpoint
+revision/status. Dirty tracked HAL files or additional untracked source/header
+inputs are rejected before building. Generated `libloragw/inc/config.h` is the
+only untracked header permitted; Make regenerates it during the forced build.
+Build without external Make/compiler flag overrides to reproduce this recipe.
+Retain the manifest with the hardware test results and verify the library path
+and hash actually mapped by the running process separately from the checkout.
 
-Stock HAL startup was unreliable on the tested board. Successful runs used a **separate companion HAL patch**, revision `79871283e08c45e89d1196a5469e1aa68f544e71`: 1 ms internal radio-SPI completion delays and 10 ms MCU reset-release delays. This patch is deliberately absent from the Meshpoint contribution. It retains stock 8 MHz host SPI; recovered Helium firmware used 1 MHz. Neither that rate difference nor the timing patch establishes a universal hardware fix.
+Stock HAL startup was unreliable on the tested board. Successful historical
+runs used the companion patch: 1 ms internal radio-SPI completion delays and
+10 ms MCU reset-release delays. Host SPI remains at the stock 8 MHz; the old
+directory name `lora_gateway_spi1mhz` was not evidence of its active bus speed.
+Neither the timing patch nor the rate difference from recovered Helium firmware
+establishes a universal hardware fix.
+
+Historical provenance limit: archived driver revision records identify 7987128,
+and the archived main `loragw_hal.c` SHA-256
+`14eaa8251e1bdddd51fea273a9b49278702522ae96a8f6480aa4e5ef0c92939a`
+matches that commit. The earlier records do not establish the absence of every
+uncommitted file throughout the historical HAL tree. A read-only re-audit on
+26 October was blocked by SSH authentication; no historical-clean-tree claim
+is made. The clean recipe above deliberately requires **no additional HAL
+patches**. Its revised ABI-2 candidate still needs a fresh Linux link/build and
+hardware validation; the old binary and RF results do not validate this revision.
 
 Install Meshpoint's Python requirements and obtain activation through the normal setup. Copy `config/sx1301-helium.example.yaml` to private `config/local.yaml`, preserving existing authentication fields on a configured system. Choose a unique device identity before enabling TX. The example disables TX, relay, periodic broadcasts, cloud publishing and MQTT; no credential or experiment-specific OG13 identity is included.
 
@@ -57,6 +96,39 @@ Passive register diagnostics are raw, uncalibrated observations. In a separate
 five-minute observation, MODEM_STATUS remained zero during known receptions;
 zero status must not be interpreted as verified channel idle. This backend
 provides no hardware CAD or clear-channel guarantee.
+
+## Review follow-up: TX and airtime
+
+The configured `radio.preamble_length` now supplies both RX (plus two SX1301
+sync symbols), native TX, and the HAL airtime calculation. The ABI-2 configure
+call passes that value to the shim; TX packets with a different preamble are
+rejected. Bounds are 6 through 65533 symbols. Changing the preamble requires
+stop/configure/start, as with other radio settings.
+
+The Meshpoint TX service reserves the full calculated airtime **before** each
+SX1301 native dispatch. A rejection, completion/status failure after emission,
+unknown result, exception or cancellation retains the reservation. Successful
+sends are charged once, with no second success charge. Attempts rejected by the
+service duty-budget check never dispatch or incur a charge. A HAL airtime
+calculation error aborts before dispatch rather than falling back to a
+fixed-preamble estimate. This is conservative
+budget accounting, not evidence that every charged attempt emitted or delivered
+a frame. SX1302 retains its existing success-based accounting.
+
+For a repeatable native contract check without radio access, after installing
+Meshpoint's Python test requirements and checking out the pinned HAL above:
+
+```sh
+SX1301_HAL_DIR=~/lora_gateway_sx1301 python -m pytest \
+  tests/test_sx1301_backend.py tests/test_sx1301_native_contract.py \
+  tests/test_sx1301_build_provenance.py -q
+```
+
+The native check compiles the real shim against actual Semtech headers with a
+fake HAL. It exercises configured preamble/airtime, observed emission followed
+by status failure, timeout and rejected sends, and clearing stale emission
+state. It never links the hardware HAL or opens SPI/GPIO. Without
+`SX1301_HAL_DIR`, that optional native test reports a skip, not a hardware pass.
 
 ## Contribution boundary
 

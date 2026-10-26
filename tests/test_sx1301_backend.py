@@ -51,7 +51,7 @@ def test_tx_requires_verified_gain_table():
 
 def test_real_sx1301_parameters_not_sx1302_abi_values():
     w = wrapper()
-    w._lib.mp1301_configure.assert_called_once_with(906875000, 11, 250, 1, 1)
+    w._lib.mp1301_configure.assert_called_once_with(906875000, 11, 250, 1, 1, 16)
     p = w.build_tx_packet(bytes(24), w._radio, TransmitConfig(tx_power_dbm=10))
     assert (p.datarate, p.bandwidth, p.coderate) == (11, 250, 1)
     assert p.preamble == 16 and not p.invert_pol and not p.no_crc
@@ -265,3 +265,116 @@ def test_receive_preamble_register_error_stops_native_owner(operation):
         w.start()
     assert not w._started
     assert w._lib.mp1301_stop.call_count == 2
+
+
+@pytest.mark.parametrize("length", [6, 8, 16, 32, 65533])
+def test_rx_tx_and_airtime_share_configured_preamble(length):
+    w = wrapper()
+    w.stop()
+    w.configure(RadioConfig(frequency_mhz=906.875, preamble_length=length), True)
+    w.start()
+    w._lib.mp1301_configure.assert_called_with(906875000, 11, 250, 1, 1, length)
+    w._lib.lgw_reg_w.assert_called_with(204, length + 2)
+    packet = w.build_tx_packet(bytes(24), w._radio, TransmitConfig(tx_power_dbm=10))
+    assert packet.preamble == length
+    assert w.get_time_on_air(packet) == 500
+    assert w.send(packet) == 0
+    with pytest.raises(ValueError, match="match configured receiver"):
+        w.send(replace(packet, preamble=length + 1))
+
+
+def test_old_native_abi_rejected_before_configuration(monkeypatch):
+    lib = MagicMock()
+    lib.mp1301_abi_version.return_value = 1
+    monkeypatch.setattr("ctypes.CDLL", lambda _path: lib)
+    w = SX1301Wrapper("unused.so")
+    with pytest.raises(RuntimeError, match="ABI"):
+        w.load()
+    lib.mp1301_configure.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["text", "nodeinfo", "built", "relay"])
+@pytest.mark.parametrize("outcome", ["success", "observed_failure", "unknown_failure", "exception"])
+async def test_sx1301_airtime_reserved_once_before_dispatch_even_on_failure(path, outcome):
+    w = wrapper()
+    duty = MagicMock()
+    duty.check_budget.return_value = True
+    service = TxService(wrapper=w, crypto=CryptoService(), radio_config=w._radio,
+        duty_tracker=duty,
+        transmit_config=TransmitConfig(enabled=True, tx_power_dbm=10, node_id=0x12341234))
+    def send(*args):
+        duty.record_tx.assert_called_once_with(500)
+        if outcome == "exception":
+            raise OSError("native status unavailable")
+        return 0 if outcome == "success" else -1
+    w._lib.mp1301_send.side_effect = send
+    w._lib.mp1301_last_tx_observed.return_value = int(outcome == "observed_failure")
+    raw = struct.pack("<IIIBBBB", 0xffffffff, 0x12345678, 999, 0x63, 8, 0, 0) + bytes(20)
+    async def dispatch():
+        if path == "relay":
+            return await service.send_raw_relay(raw)
+        if path == "nodeinfo":
+            return await service.send_nodeinfo("Synthetic node", "TEST")
+        if path == "built":
+            return await service._send_built_packet(raw, 999, label="regression")
+        return await service.send_text("synthetic airtime test")
+    if outcome == "exception":
+        with pytest.raises(OSError):
+            await dispatch()
+    else:
+        result = await dispatch()
+        assert result.success == (outcome == "success")
+    duty.record_tx.assert_called_once_with(500)
+
+
+@pytest.mark.asyncio
+async def test_sx1301_duty_rejection_never_dispatches_or_charges():
+    w = wrapper()
+    duty = MagicMock()
+    duty.check_budget.return_value = False
+    service = TxService(wrapper=w, crypto=CryptoService(), radio_config=w._radio,
+        duty_tracker=duty,
+        transmit_config=TransmitConfig(enabled=True, tx_power_dbm=10, node_id=0x12341234))
+    result = await service._send_built_packet(bytes(24), 999, label="blocked")
+    assert not result.success
+    w._lib.mp1301_send.assert_not_called()
+    duty.record_tx.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sx1301_cancellation_keeps_airtime_reservation(monkeypatch):
+    import asyncio
+
+    w = wrapper()
+    duty = MagicMock()
+    service = TxService(wrapper=w, crypto=CryptoService(), radio_config=w._radio,
+        duty_tracker=duty,
+        transmit_config=TransmitConfig(enabled=True, tx_power_dbm=10, node_id=0x12341234))
+    entered = asyncio.Event()
+    async def pending_send(*args):
+        duty.record_tx.assert_called_once_with(500)
+        entered.set()
+        await asyncio.Event().wait()
+    monkeypatch.setattr("src.transmit.tx_service.asyncio.to_thread", pending_send)
+    packet = w.build_tx_packet(bytes(24), w._radio, TransmitConfig(tx_power_dbm=10))
+    task = asyncio.create_task(service._send_with_airtime_accounting(packet, 500))
+    await asyncio.wait_for(entered.wait(), 1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    duty.record_tx.assert_called_once_with(500)
+
+
+@pytest.mark.asyncio
+async def test_sx1301_airtime_error_aborts_before_native_dispatch():
+    w = wrapper()
+    w._lib.mp1301_airtime.return_value = -1
+    duty = MagicMock()
+    service = TxService(wrapper=w, crypto=CryptoService(), radio_config=w._radio,
+        duty_tracker=duty,
+        transmit_config=TransmitConfig(enabled=True, tx_power_dbm=10, node_id=0x12341234))
+    with pytest.raises(RuntimeError, match="airtime"):
+        await service._send_built_packet(bytes(24), 999, label="airtime error")
+    w._lib.mp1301_send.assert_not_called()
+    duty.record_tx.assert_not_called()

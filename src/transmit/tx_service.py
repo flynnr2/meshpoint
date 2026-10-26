@@ -254,10 +254,8 @@ class TxService:
                 airtime_ms=airtime_ms,
             )
 
-        result_code = await asyncio.to_thread(self._wrapper.send, tx_pkt)
+        result_code = await self._send_with_airtime_accounting(tx_pkt, airtime_ms)
         if result_code == 0:
-            if self._duty:
-                self._duty.record_tx(airtime_ms)
             return SendResult(
                 success=True,
                 protocol="meshtastic",
@@ -392,7 +390,7 @@ class TxService:
         pre_status = await asyncio.to_thread(self._wrapper.get_tx_status, 0)
         logger.info("TX status before send: %d", pre_status)
 
-        result_code = await asyncio.to_thread(self._wrapper.send, tx_pkt)
+        result_code = await self._send_with_airtime_accounting(tx_pkt, airtime_ms)
 
         if result_code == 0:
             for delay in (0.05, 0.1, 0.5, 1.0):
@@ -402,8 +400,6 @@ class TxService:
                 if st == 2:
                     break
 
-            if self._duty:
-                self._duty.record_tx(airtime_ms)
             return SendResult(
                 success=True,
                 protocol="meshtastic",
@@ -709,10 +705,8 @@ class TxService:
                 airtime_ms=airtime_ms,
             )
 
-        result_code = await asyncio.to_thread(self._wrapper.send, tx_pkt)
+        result_code = await self._send_with_airtime_accounting(tx_pkt, airtime_ms)
         if result_code == 0:
-            if self._duty:
-                self._duty.record_tx(airtime_ms)
             logger.info("TX %s OK: id=%08x airtime=%dms", label, packet_id, airtime_ms)
             return SendResult(
                 success=True,
@@ -789,12 +783,8 @@ class TxService:
             hop_limit, hop_limit - 1, len(new_packet_bytes), airtime_ms,
         )
 
-        result_code = await asyncio.to_thread(
-            self._wrapper.send, tx_pkt
-        )
+        result_code = await self._send_with_airtime_accounting(tx_pkt, airtime_ms)
         if result_code == 0:
-            if self._duty:
-                self._duty.record_tx(airtime_ms)
             return SendResult(
                 success=True,
                 protocol="meshtastic",
@@ -900,6 +890,19 @@ class TxService:
 
         return tx_pkt
 
+    async def _send_with_airtime_accounting(self, tx_pkt, airtime_ms: int) -> int:
+        # SX1301 may report failure after emission, or lose status before it can
+        # establish completion. Reserve the entire planned airtime before dispatch,
+        # retaining the charge even on rejection, exception or cancellation. Never
+        # retry/refund an uncertain native attempt. SX1302 retains success accounting.
+        reserve = getattr(self._wrapper, "hardware_backend", None) == "sx1301"
+        if reserve and self._duty:
+            self._duty.record_tx(airtime_ms)
+        result_code = await asyncio.to_thread(self._wrapper.send, tx_pkt)
+        if not reserve and result_code == 0 and self._duty:
+            self._duty.record_tx(airtime_ms)
+        return result_code
+
     async def _get_airtime(self, tx_pkt) -> int:
         """Compute airtime via the HAL (or estimate if unavailable)."""
         try:
@@ -907,6 +910,9 @@ class TxService:
                 self._wrapper.get_time_on_air, tx_pkt
             )
         except Exception:
+            if getattr(self._wrapper, "hardware_backend", None) == "sx1301":
+                # A fixed-preamble estimate cannot safely budget arbitrary SX1301 settings.
+                raise
             return self._estimate_airtime(tx_pkt.size, tx_pkt.datarate)
 
     @staticmethod
